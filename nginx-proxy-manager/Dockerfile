@@ -4,14 +4,19 @@
 ARG BUILD_FROM
 FROM jc21/nginx-proxy-manager:2.14.0
 
-# Redirect Let's Encrypt certificate storage into the persistent /data volume
-# so certs survive add-on restarts and updates.
+# Redirect Let's Encrypt certificate storage into the persistent /data volume.
+# NPM's prepare service uses `mountpoint -q /etc/letsencrypt` which requires a
+# real Docker volume mount — a symlink doesn't satisfy it. Patch the check to
+# a simple existence test so our symlink is accepted.
 RUN rm -rf /etc/letsencrypt \
-    && ln -s /data/letsencrypt /etc/letsencrypt
+    && ln -s /data/letsencrypt /etc/letsencrypt \
+    && file=$(grep -rl "letsencrypt is not mounted" /etc/s6-overlay/ /app/ 2>/dev/null | head -1) \
+    && if [ -n "$file" ]; then \
+         sed -i 's|mountpoint -q /etc/letsencrypt|test -e /etc/letsencrypt|g' "$file"; \
+       fi
 
 # Run our HA setup script early in s6's cont-init sequence.
-# This creates required /data sub-directories on the mounted volume before
-# NPM's own services start.
+# Uses /bin/sh — with-contenv is not available in the jc21 base image.
 COPY cont-init.d/01-ha-setup.sh /etc/cont-init.d/01-ha-setup.sh
 RUN chmod +x /etc/cont-init.d/01-ha-setup.sh
 

@@ -43,6 +43,15 @@ secrets.*
 .cache/
 .home-assistant_v2.db
 
+# HA add-on local dev data (created when testing add-ons locally)
+*/data/
+*/config/
+*/ssl/
+
+# HA add-on build artifacts
+*/build/
+*/.dockerignore.tmp
+
 # Docker / artifact outputs
 docker-compose.override.yml
 *.tar
@@ -52,6 +61,9 @@ docker-compose.override.yml
 .env
 .env.*
 local_settings.py
+
+# Claude Code
+.claude/
 
 # Misc
 *.swp

@@ -17,7 +17,6 @@
     "81/tcp": "Admin web UI",
     "443/tcp": "HTTPS proxy traffic"
   },
-  "map": ["data:rw"],
   "options": {},
   "schema": {}
 }

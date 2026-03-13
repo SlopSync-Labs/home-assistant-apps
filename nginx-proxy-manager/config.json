@@ -7,6 +7,9 @@
   "arch": ["amd64", "aarch64", "armv7"],
   "startup": "services",
   "boot": "auto",
+  "init": false,
+  "webui": "http://[HOST]:[PORT:81]",
+  "backup_exclude": ["*/logs"],
   "ports": {
     "80/tcp": 80,
     "81/tcp": 81,

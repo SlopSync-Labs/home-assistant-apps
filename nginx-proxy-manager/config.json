@@ -1,8 +1,8 @@
 {
   "name": "Nginx Proxy Manager",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "slug": "nginx-proxy-manager",
-  "description": "Expose your services easily and securely with a beautiful GUI for Nginx. Tracks the latest upstream jc21/nginx-proxy-manager release.",
+  "description": "Expose your services easily and securely with a beautiful GUI for Nginx. Tracks the latest upstream jc21/nginx-proxy-manager release. Report bugs, issues, or feature requests: https://github.com/SlopSync-Labs/home-assistant-apps/issues",
   "url": "https://github.com/NginxProxyManager/nginx-proxy-manager",
   "arch": ["amd64", "aarch64", "armv7"],
   "startup": "services",

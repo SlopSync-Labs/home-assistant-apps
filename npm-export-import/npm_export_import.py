@@ -250,14 +250,22 @@ def _import_access_lists(base, headers, access_lists):
 
 
 def _check(resp, context=""):
-    """Raise on HTTP error, logging the response body for easier debugging."""
+    """Log and raise on HTTP error. Returns False if the entry already exists (skip),
+    True on success, raises on all other errors."""
     if not resp.ok:
         try:
             detail = resp.json()
         except Exception:
             detail = resp.text
+        if "already in use" in str(detail).lower():
+            msg = ""
+            if isinstance(detail, dict) and isinstance(detail.get("error"), dict):
+                msg = detail["error"].get("message", "")
+            _log(f"[import] SKIP {context} — already exists on target ({msg or detail})")
+            return False
         _log(f"[import] ERROR {resp.status_code} {context}: {detail}")
         resp.raise_for_status()
+    return True
 
 
 def import_all(cfg, import_file):
@@ -296,8 +304,8 @@ def import_all(cfg, import_file):
             json=payload,
             timeout=15,
         )
-        _check(resp, f"proxy_host {ph['id']} {ph.get('domain_names')}")
-        _log(f"[import] proxy_host {ph['id']} -> {resp.json()['id']} ({ph.get('domain_names')})")
+        if _check(resp, f"proxy_host {ph['id']} {ph.get('domain_names')}"):
+            _log(f"[import] proxy_host {ph['id']} -> {resp.json()['id']} ({ph.get('domain_names')})")
 
     for rh in data.get("redirection_hosts", []):
         payload = _strip(rh)
@@ -317,8 +325,8 @@ def import_all(cfg, import_file):
             json=payload,
             timeout=15,
         )
-        _check(resp, f"redirection_host {rh['id']} {rh.get('domain_names')}")
-        _log(f"[import] redirection_host {rh['id']} -> {resp.json()['id']}")
+        if _check(resp, f"redirection_host {rh['id']} {rh.get('domain_names')}"):
+            _log(f"[import] redirection_host {rh['id']} -> {resp.json()['id']}")
 
     for st in data.get("streams", []):
         payload = {
@@ -335,8 +343,8 @@ def import_all(cfg, import_file):
             json=payload,
             timeout=15,
         )
-        _check(resp, f"stream {st['id']}")
-        _log(f"[import] stream {st['id']} -> {resp.json()['id']}")
+        if _check(resp, f"stream {st['id']}"):
+            _log(f"[import] stream {st['id']} -> {resp.json()['id']}")
 
     _log("[import] Done.")
 

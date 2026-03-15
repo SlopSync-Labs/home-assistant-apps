@@ -107,6 +107,11 @@ def save_options(updates):
         timeout=10,
     )
     resp.raise_for_status()
+    # The Supervisor API updates HA's config store but does not rewrite
+    # /data/options.json until the add-on restarts. Write it ourselves so
+    # load_options() returns fresh values immediately.
+    with open(OPTIONS_PATH, "w") as f:
+        json.dump(updates, f)
 
 
 def _read_cert_files(cert_id):

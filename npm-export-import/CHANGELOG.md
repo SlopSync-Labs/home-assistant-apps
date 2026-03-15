@@ -2,6 +2,16 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.2] - 2026-03-15
+
+### Fixed
+
+- Added `bash` to the Dockerfile via `apk add --no-cache bash` — `python:3.11-alpine`
+  ships with `ash` only; HA Supervisor invokes `run.sh` with bash, causing a startup crash
+- Set `SHELL ["/bin/bash", "-c"]` so subsequent `RUN` steps use bash
+
+---
+
 ## [0.1.1] - 2026-03-15
 
 ### Added

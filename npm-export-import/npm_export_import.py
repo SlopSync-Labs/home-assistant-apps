@@ -217,7 +217,25 @@ def _import_access_lists(base, headers, access_lists):
     al_id_map = {}
     for al in access_lists:
         old_id = al["id"]
-        payload = _strip(al)
+        # Only send the fields NPM's create endpoint accepts — GET returns extra
+        # relation fields like proxy_hosts that cause a 400 if echoed back.
+        # Note: htpasswd passwords are exported as bcrypt hashes; NPM will store
+        # them as-is so auth still works, but they will be double-hashed on the
+        # target if NPM re-hashes on write. Passwords are included on a best-effort
+        # basis; users may need to reset credentials after migration.
+        payload = {
+            "name": al.get("name", ""),
+            "satisfy_any": al.get("satisfy_any", False),
+            "pass_auth": al.get("pass_auth", False),
+            "items": [
+                {"username": item.get("username", ""), "password": item.get("password", "")}
+                for item in al.get("items", [])
+            ],
+            "clients": [
+                {"address": c.get("address", ""), "directive": c.get("directive", "allow")}
+                for c in al.get("clients", [])
+            ],
+        }
         resp = requests.post(
             f"{base}/api/nginx/access-lists",
             headers=headers,

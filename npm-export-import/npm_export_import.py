@@ -249,6 +249,17 @@ def _import_access_lists(base, headers, access_lists):
     return al_id_map
 
 
+def _check(resp, context=""):
+    """Raise on HTTP error, logging the response body for easier debugging."""
+    if not resp.ok:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text
+        _log(f"[import] ERROR {resp.status_code} {context}: {detail}")
+        resp.raise_for_status()
+
+
 def import_all(cfg, import_file):
     path = os.path.join(EXPORT_DIR, import_file)
     _log(f"[import] Loading {import_file}...")
@@ -299,7 +310,7 @@ def import_all(cfg, import_file):
             json=payload,
             timeout=15,
         )
-        resp.raise_for_status()
+        _check(resp, f"proxy_host {ph['id']} {ph.get('domain_names')} payload={payload}")
         _log(f"[import] proxy_host {ph['id']} -> {resp.json()['id']} ({ph.get('domain_names')})")
 
     for rh in data.get("redirection_hosts", []):
@@ -333,7 +344,7 @@ def import_all(cfg, import_file):
             json=payload,
             timeout=15,
         )
-        resp.raise_for_status()
+        _check(resp, f"redirection_host {rh['id']} {rh.get('domain_names')}")
         _log(f"[import] redirection_host {rh['id']} -> {resp.json()['id']}")
 
     for st in data.get("streams", []):
@@ -351,7 +362,7 @@ def import_all(cfg, import_file):
             json=payload,
             timeout=15,
         )
-        resp.raise_for_status()
+        _check(resp, f"stream {st['id']}")
         _log(f"[import] stream {st['id']} -> {resp.json()['id']}")
 
     _log("[import] Done.")

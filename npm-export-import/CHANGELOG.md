@@ -2,6 +2,22 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.5] - 2026-03-15
+
+### Fixed
+
+- Import 400 errors on access lists, streams — replaced `_strip()` pass-through
+  with explicit field allowlists to exclude NPM relation fields (e.g. `proxy_hosts`)
+  that GET returns but POST rejects
+- Reverted proxy host and redirection host import back to `_strip()` which was
+  already working correctly
+- Added `_check()` helper to log NPM's error response body on failed imports
+  instead of only reporting the HTTP status code
+- Settings tab: after saving, `/data/options.json` is now also written directly
+  so `load_options()` returns fresh values without an add-on restart
+
+---
+
 ## [0.1.4] - 2026-03-15
 
 ### Added

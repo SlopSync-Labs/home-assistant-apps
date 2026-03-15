@@ -2,6 +2,22 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.4] - 2026-03-15
+
+### Added
+
+- Settings tab in the web UI — edit NPM connection details and schedule configuration
+  without leaving the HA panel; changes are written back via the HA Supervisor API
+  (`POST http://supervisor/addons/self/options`) and reflected in the HA add-on
+  Configuration tab immediately
+- `GET /api/config` endpoint — returns current add-on options with passwords masked
+- `POST /api/config` endpoint — saves updated options via Supervisor API; password
+  fields left blank are preserved unchanged (sentinel value pattern)
+- `hassio_api: true` and `hassio_role: "default"` in `config.json` to enable
+  Supervisor API access
+
+---
+
 ## [0.1.3] - 2026-03-15
 
 ### Added

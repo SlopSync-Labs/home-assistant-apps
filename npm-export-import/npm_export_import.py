@@ -26,6 +26,8 @@ ENTITY_ENDPOINTS = {
 # Fields assigned by NPM on creation — must be stripped before POSTing
 STRIP_FIELDS = {"id", "created_on", "modified_on", "owner_user_id", "owner", "meta"}
 
+_MASKED = "\u2022\u2022\u2022\u2022\u2022"  # sentinel: password field left unchanged by user
+
 # --- shared state ---
 _log_lines = collections.deque(maxlen=200)
 _op_lock = threading.Lock()
@@ -93,6 +95,18 @@ def authenticate(cfg):
 def load_options():
     with open(OPTIONS_PATH) as f:
         return json.load(f)
+
+
+def save_options(updates):
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    resp = requests.post(
+        "http://supervisor/addons/self/options",
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json"},
+        json={"options": updates},
+        timeout=10,
+    )
+    resp.raise_for_status()
 
 
 def _read_cert_files(cert_id):
@@ -367,28 +381,85 @@ _HTML = r"""<!DOCTYPE html>
     #otp-error { font-size: 0.8rem; color: #e53935; min-height: 1.2em;
                  margin-bottom: 0.5rem; }
     #otp-modal .actions { display: flex; justify-content: flex-end; }
+    /* Tabs */
+    .tabs { display: flex; gap: 0.25rem; margin-bottom: 1.25rem; }
+    .tab  { background: #e0e0e0; color: #555; border-radius: 6px 6px 0 0;
+            padding: 0.45rem 1.1rem; font-size: 0.85rem; font-weight: 500; }
+    .tab.active { background: #03a9f4; color: #fff; }
+    /* Settings form */
+    .field-group { display: flex; flex-direction: column; gap: 0.6rem; }
+    .field-group label { font-size: 0.8rem; color: #666; font-weight: 500; }
+    .field-group input[type="url"],
+    .field-group input[type="email"],
+    .field-group input[type="password"],
+    .field-group input[type="number"] {
+      padding: 0.45rem 0.6rem; border: 1px solid #ddd; border-radius: 5px;
+      font-size: 0.85rem; width: 100%; }
+    .field-group input:focus { outline: none; border-color: #03a9f4; }
+    .checkbox-label { display: flex; align-items: center; gap: 0.5rem;
+                      font-size: 0.85rem; color: #333; font-weight: normal; }
+    #save-status { font-size: 0.82rem; color: #888; margin-left: 0.6rem; }
   </style>
 </head>
 <body>
   <h1>NPM Export Import</h1>
 
-  <div class="card">
-    <div class="meta">Connected to: <code id="npm-url">…</code></div>
-    <h2>Export</h2>
-    <button class="btn-primary" id="btn-export" onclick="triggerExport()">Export Now</button>
-    <span id="op-status"></span>
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('operations', this)">Operations</button>
+    <button class="tab" onclick="showTab('settings', this)">Settings</button>
   </div>
 
-  <div class="card">
-    <h2>Import</h2>
-    <p class="meta">Select a backup file to restore into NPM.
-       Run against a fresh or cleared instance to avoid duplicates.</p>
-    <div class="file-list" id="file-list"><span class="empty">Loading…</span></div>
+  <div id="tab-operations">
+    <div class="card">
+      <div class="meta">Connected to: <code id="npm-url">…</code></div>
+      <h2>Export</h2>
+      <button class="btn-primary" id="btn-export" onclick="triggerExport()">Export Now</button>
+      <span id="op-status"></span>
+    </div>
+
+    <div class="card">
+      <h2>Import</h2>
+      <p class="meta">Select a backup file to restore into NPM.
+         Run against a fresh or cleared instance to avoid duplicates.</p>
+      <div class="file-list" id="file-list"><span class="empty">Loading…</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Log</h2>
+      <div id="log"></div>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>Log</h2>
-    <div id="log"></div>
+  <div id="tab-settings" style="display:none">
+    <div class="card">
+      <h2>NPM Connection</h2>
+      <div class="field-group">
+        <label>NPM URL</label>
+        <input type="url" id="cfg-npm-url">
+        <label>Username</label>
+        <input type="email" id="cfg-npm-username">
+        <label>Password</label>
+        <input type="password" id="cfg-npm-password" placeholder="leave blank to keep current">
+        <label>Pre-generated Token (optional — for 2FA / scheduled use)</label>
+        <input type="password" id="cfg-npm-token" placeholder="leave blank to keep current">
+      </div>
+    </div>
+    <div class="card">
+      <h2>Scheduled Export</h2>
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="cfg-schedule-enabled">
+          Enable automatic scheduled exports
+        </label>
+        <label>Interval (hours)</label>
+        <input type="number" id="cfg-schedule-hours" min="1" max="168">
+      </div>
+      <p class="meta" style="margin-top:0.75rem">
+        &#9888;&#65039; Schedule changes take effect after restarting the add-on.
+      </p>
+    </div>
+    <button class="btn-primary" id="btn-save" onclick="saveConfig()">Save</button>
+    <span id="save-status"></span>
   </div>
 
   <!-- 2FA modal -->
@@ -413,6 +484,55 @@ _HTML = r"""<!DOCTYPE html>
     let _pendingOp = null;       // {type:'export'} or {type:'import', filename:'...'}
     let _challengeToken = null;
 
+    function showTab(name, btn) {
+      document.getElementById('tab-operations').style.display =
+        name === 'operations' ? '' : 'none';
+      document.getElementById('tab-settings').style.display =
+        name === 'settings' ? '' : 'none';
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      if (name === 'settings') loadConfig();
+    }
+
+    async function loadConfig() {
+      try {
+        const d = await (await fetch(base + '/api/config')).json();
+        document.getElementById('cfg-npm-url').value      = d.npm_url;
+        document.getElementById('cfg-npm-username').value = d.npm_username;
+        document.getElementById('cfg-npm-password').value = '';
+        document.getElementById('cfg-npm-token').value    = '';
+        document.getElementById('cfg-npm-password').placeholder =
+          d.npm_password ? 'leave blank to keep current' : 'not set';
+        document.getElementById('cfg-npm-token').placeholder =
+          d.npm_token ? 'leave blank to keep current' : 'not set';
+        document.getElementById('cfg-schedule-enabled').checked = d.schedule_enabled;
+        document.getElementById('cfg-schedule-hours').value     = d.schedule_interval_hours;
+      } catch (_) {}
+    }
+
+    async function saveConfig() {
+      document.getElementById('btn-save').disabled = true;
+      document.getElementById('save-status').textContent = '';
+      const pwdVal   = document.getElementById('cfg-npm-password').value;
+      const tokenVal = document.getElementById('cfg-npm-token').value;
+      const body = {
+        npm_url:                 document.getElementById('cfg-npm-url').value,
+        npm_username:            document.getElementById('cfg-npm-username').value,
+        npm_password:            pwdVal   || '\u2022\u2022\u2022\u2022\u2022',
+        npm_token:               tokenVal || '\u2022\u2022\u2022\u2022\u2022',
+        schedule_enabled:        document.getElementById('cfg-schedule-enabled').checked,
+        schedule_interval_hours: parseInt(document.getElementById('cfg-schedule-hours').value) || 24,
+      };
+      const r = await fetch(base + '/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      document.getElementById('btn-save').disabled = false;
+      document.getElementById('save-status').textContent = r.ok ? '\u2713 Saved' : '\u2717 Save failed';
+      if (r.ok) setTimeout(() => document.getElementById('save-status').textContent = '', 3000);
+    }
+
     async function loadStatus() {
       try {
         const d = await (await fetch(base + '/api/status')).json();
@@ -421,7 +541,7 @@ _HTML = r"""<!DOCTYPE html>
         document.getElementById('btn-export').disabled = busy;
         document.querySelectorAll('.btn-import').forEach(b => b.disabled = busy);
         document.getElementById('op-status').textContent =
-          d.running ? '⏳ Operation in progress…' : '';
+          d.running ? '\u23f3 Operation in progress\u2026' : '';
 
         if (d.pending_2fa && !_challengeToken) {
           _challengeToken = d.pending_2fa;
@@ -469,7 +589,7 @@ _HTML = r"""<!DOCTYPE html>
     async function triggerExport() {
       _pendingOp = { type: 'export' };
       document.getElementById('btn-export').disabled = true;
-      document.getElementById('op-status').textContent = '⏳ Starting…';
+      document.getElementById('op-status').textContent = '\u23f3 Starting\u2026';
       await fetch(base + '/api/export', { method: 'POST' });
     }
 
@@ -477,7 +597,7 @@ _HTML = r"""<!DOCTYPE html>
       if (!confirm(`Import from:\n${filename}\n\nThis will create new entries in NPM.`)) return;
       _pendingOp = { type: 'import', filename };
       document.querySelectorAll('.btn-import').forEach(b => b.disabled = true);
-      document.getElementById('op-status').textContent = '⏳ Starting…';
+      document.getElementById('op-status').textContent = '\u23f3 Starting\u2026';
       await fetch(base + '/api/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -503,7 +623,7 @@ _HTML = r"""<!DOCTYPE html>
       // Auth succeeded — hide modal and auto-retry the pending operation
       document.getElementById('otp-overlay').classList.remove('active');
       _challengeToken = null;
-      document.getElementById('op-status').textContent = '✓ Authenticated';
+      document.getElementById('op-status').textContent = '\u2713 Authenticated';
       if (_pendingOp) {
         const op = _pendingOp;
         _pendingOp = null;
@@ -576,6 +696,39 @@ def api_verify2fa():
     _pending_2fa = None
     _log("[auth] 2FA verified — session token cached")
     return jsonify({"status": "authenticated"})
+
+
+@app.route("/api/config")
+def api_config_get():
+    cfg = load_options()
+    def mask(val):
+        return _MASKED if val else ""
+    return jsonify({
+        "npm_url":                 cfg.get("npm_url", ""),
+        "npm_username":            cfg.get("npm_username", ""),
+        "npm_password":            mask(cfg.get("npm_password", "")),
+        "npm_token":               mask(cfg.get("npm_token", "")),
+        "schedule_enabled":        cfg.get("schedule_enabled", False),
+        "schedule_interval_hours": cfg.get("schedule_interval_hours", 24),
+    })
+
+
+@app.route("/api/config", methods=["POST"])
+def api_config_post():
+    body = flask_request.get_json() or {}
+    current = load_options()
+    updates = {}
+    for key in ("npm_url", "npm_username", "schedule_enabled", "schedule_interval_hours"):
+        if key in body:
+            updates[key] = body[key]
+    for key in ("npm_password", "npm_token"):
+        val = body.get(key, _MASKED)
+        if val != _MASKED:
+            updates[key] = val
+        else:
+            updates[key] = current.get(key, "")
+    save_options(updates)
+    return jsonify({"status": "saved"})
 
 
 @app.route("/api/export", methods=["POST"])

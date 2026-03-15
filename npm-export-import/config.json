@@ -1,6 +1,6 @@
 {
   "name": "NPM Export Import",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "slug": "npm-export-import",
   "description": "Export and import Nginx Proxy Manager configuration (proxy hosts, redirections, streams, access lists, and SSL certificates) via a web UI.",
   "url": "https://github.com/SlopSync-Labs/home-assistant-apps",
@@ -10,6 +10,8 @@
   "init": false,
   "ingress": true,
   "ingress_port": 8099,
+  "hassio_api": true,
+  "hassio_role": "default",
   "map": ["share:rw", "ssl:rw"],
   "options": {
     "npm_url": "http://homeassistant.local:81",

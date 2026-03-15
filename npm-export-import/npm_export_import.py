@@ -281,7 +281,7 @@ def import_all(cfg, import_file):
             "forward_host":        ph.get("forward_host", ""),
             "forward_port":        ph.get("forward_port", 80),
             "access_list_id":      al_id_map.get(old_al_id, 0) if old_al_id else 0,
-            "certificate_id":      new_cert_id or None,
+            "certificate_id":      new_cert_id,
             "ssl_forced":          ssl_forced,
             "hsts_enabled":        ph.get("hsts_enabled", False),
             "hsts_subdomains":     ph.get("hsts_subdomains", False),
@@ -292,7 +292,6 @@ def import_all(cfg, import_file):
             "locations":           ph.get("locations", []),
             "advanced_config":     ph.get("advanced_config", ""),
             "enabled":             ph.get("enabled", True),
-            "meta":                ph.get("meta", {}),
         }
         resp = requests.post(
             f"{base}/api/nginx/proxy-hosts",
@@ -319,7 +318,7 @@ def import_all(cfg, import_file):
             "forward_http_code":   rh.get("forward_http_code", 302),
             "forward_domain_name": rh.get("forward_domain_name", ""),
             "preserve_path":       rh.get("preserve_path", False),
-            "certificate_id":      new_cert_id or None,
+            "certificate_id":      new_cert_id,
             "ssl_forced":          ssl_forced,
             "hsts_enabled":        rh.get("hsts_enabled", False),
             "hsts_subdomains":     rh.get("hsts_subdomains", False),
@@ -327,7 +326,6 @@ def import_all(cfg, import_file):
             "block_exploits":      rh.get("block_exploits", False),
             "advanced_config":     rh.get("advanced_config", ""),
             "enabled":             rh.get("enabled", True),
-            "meta":                rh.get("meta", {}),
         }
         resp = requests.post(
             f"{base}/api/nginx/redirection-hosts",
@@ -346,7 +344,6 @@ def import_all(cfg, import_file):
             "tcp_forwarding":  st.get("tcp_forwarding", True),
             "udp_forwarding":  st.get("udp_forwarding", False),
             "enabled":         st.get("enabled", True),
-            "meta":            st.get("meta", {}),
         }
         resp = requests.post(
             f"{base}/api/nginx/streams",

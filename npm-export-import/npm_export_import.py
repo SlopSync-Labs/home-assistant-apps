@@ -335,7 +335,6 @@ def import_all(cfg, import_file):
             "forwarding_port": st.get("forwarding_port"),
             "tcp_forwarding":  st.get("tcp_forwarding", True),
             "udp_forwarding":  st.get("udp_forwarding", False),
-            "enabled":         st.get("enabled", True),
         }
         resp = requests.post(
             f"{base}/api/nginx/streams",
@@ -642,12 +641,32 @@ _HTML = r"""<!DOCTYPE html>
       await fetch(base + '/api/export', { method: 'POST' });
     }
 
-    async function triggerImport(filename) {
-      if (!confirm(`Import from:\n${filename}\n\nThis will create new entries in NPM.`)) return;
+    let _importArmed = null;   // filename armed for confirm, or null
+    let _importArmTimer = null;
+
+    function triggerImport(filename) {
+      if (_importArmed !== filename) {
+        // First click — arm the button
+        _importArmed = filename;
+        const btn = event.target.closest('button');
+        const original = btn.textContent;
+        btn.textContent = 'Confirm?';
+        btn.style.background = '#e53935';
+        clearTimeout(_importArmTimer);
+        _importArmTimer = setTimeout(() => {
+          _importArmed = null;
+          btn.textContent = original;
+          btn.style.background = '';
+        }, 3000);
+        return;
+      }
+      // Second click — fire
+      clearTimeout(_importArmTimer);
+      _importArmed = null;
       _pendingOp = { type: 'import', filename };
-      document.querySelectorAll('.btn-import').forEach(b => b.disabled = true);
+      document.querySelectorAll('.btn-import').forEach(b => { b.disabled = true; b.style.background = ''; b.textContent = 'Import'; });
       document.getElementById('op-status').textContent = '\u23f3 Starting\u2026';
-      await fetch(base + '/api/import', {
+      fetch(base + '/api/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename })

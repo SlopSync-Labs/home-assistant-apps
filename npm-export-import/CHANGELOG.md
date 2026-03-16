@@ -3,6 +3,18 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.10] - 2026-03-15
+
+### Fixed
+
+- Proxy host import now PUTs (updates) existing entries instead of skipping on
+  "already in use" — ensures `access_list_id` and `certificate_id` remapping is
+  always applied even when the host was previously imported
+- Proxy host deduplication uses a pre-fetched domain→id map so existing hosts
+  are found without relying on error responses
+
+---
+
 ## [0.1.9] - 2026-03-15
 
 ### Fixed

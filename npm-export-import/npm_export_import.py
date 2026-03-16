@@ -314,6 +314,17 @@ def import_all(cfg, import_file):
     cert_id_map = _import_certificates(base, headers, data.get("certificates", []))
     al_id_map = _import_access_lists(base, json_headers, data.get("access_lists", []))
 
+    # Build domain -> id map of proxy hosts already on the target so we can
+    # PUT (update) rather than POST (duplicate) when a host already exists.
+    existing_ph_resp = requests.get(f"{base}/api/nginx/proxy-hosts", headers=json_headers, timeout=15)
+    existing_ph_by_domain = {}
+    if existing_ph_resp.ok:
+        for existing in existing_ph_resp.json():
+            for domain in existing.get("domain_names", []):
+                existing_ph_by_domain[domain] = existing["id"]
+    else:
+        _log(f"[import] WARNING: could not fetch existing proxy hosts ({existing_ph_resp.status_code}) — duplicate check skipped")
+
     for ph in data.get("proxy_hosts", []):
         payload = _strip(ph)
         old_al_id = payload.get("access_list_id", 0)
@@ -329,14 +340,28 @@ def import_all(cfg, import_file):
                     f"[import] WARNING: proxy_host {ph['id']} ({ph.get('domain_names')}) "
                     f"had cert id={old_cert_id} which was not restored — SSL disabled"
                 )
-        resp = requests.post(
-            f"{base}/api/nginx/proxy-hosts",
-            headers=json_headers,
-            json=payload,
-            timeout=15,
-        )
-        if _check(resp, f"proxy_host {ph['id']} {ph.get('domain_names')}"):
-            _log(f"[import] proxy_host {ph['id']} -> {resp.json()['id']} ({ph.get('domain_names')})")
+
+        domains = ph.get("domain_names", [])
+        existing_id = next((existing_ph_by_domain[d] for d in domains if d in existing_ph_by_domain), None)
+
+        if existing_id:
+            resp = requests.put(
+                f"{base}/api/nginx/proxy-hosts/{existing_id}",
+                headers=json_headers,
+                json=payload,
+                timeout=15,
+            )
+            if _check(resp, f"proxy_host {ph['id']} {domains} update"):
+                _log(f"[import] proxy_host {ph['id']} -> {existing_id} ({domains}) — updated existing")
+        else:
+            resp = requests.post(
+                f"{base}/api/nginx/proxy-hosts",
+                headers=json_headers,
+                json=payload,
+                timeout=15,
+            )
+            if _check(resp, f"proxy_host {ph['id']} {domains}"):
+                _log(f"[import] proxy_host {ph['id']} -> {resp.json()['id']} ({domains})")
 
     for rh in data.get("redirection_hosts", []):
         payload = _strip(rh)

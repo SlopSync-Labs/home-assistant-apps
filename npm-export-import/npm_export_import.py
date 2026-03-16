@@ -3,7 +3,6 @@ import collections
 import json
 import os
 import threading
-import time
 from datetime import datetime, timezone
 
 import requests
@@ -32,7 +31,6 @@ _MASKED = "\u2022\u2022\u2022\u2022\u2022"  # sentinel: password field left unch
 _log_lines = collections.deque(maxlen=200)
 _op_lock = threading.Lock()
 _op_running = False
-_pending_2fa = None                          # challenge_token waiting for OTP input
 _session = {"token": None, "expires": None}  # cached JWT session
 
 
@@ -44,11 +42,6 @@ def _log(msg):
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
-
-class TwoFactorRequired(Exception):
-    def __init__(self, challenge_token):
-        self.challenge_token = challenge_token
-
 
 def _get_session_token():
     if _session["token"] and _session["expires"]:
@@ -63,17 +56,10 @@ def _set_session_token(token, expires_str):
 
 
 def authenticate(cfg):
-    # 1. Pre-configured static token (npm_token) — used for scheduled/headless operation
-    static = (cfg.get("npm_token") or "").strip()
-    if static:
-        return {"Authorization": f"Bearer {static}"}
-
-    # 2. Valid cached session token from a previous interactive login
     cached = _get_session_token()
     if cached:
         return {"Authorization": f"Bearer {cached}"}
 
-    # 3. Username/password — may raise TwoFactorRequired for 2FA-protected accounts
     url = f"{cfg['npm_url'].rstrip('/')}/api/tokens"
     resp = requests.post(
         url,
@@ -83,7 +69,9 @@ def authenticate(cfg):
     resp.raise_for_status()
     data = resp.json()
     if data.get("requires_2fa"):
-        raise TwoFactorRequired(data["challenge_token"])
+        raise RuntimeError(
+            "NPM account has 2FA enabled — disable 2FA on your NPM account to use this add-on"
+        )
     _set_session_token(data["token"], data["expires"])
     return {"Authorization": f"Bearer {data['token']}"}
 
@@ -415,27 +403,6 @@ def import_all(cfg, import_file):
     _log("[import] Done.")
 
 
-def _schedule_loop(cfg):
-    interval_secs = int(cfg.get("schedule_interval_hours") or 24) * 3600
-    _log(f"[schedule] Auto-export every {interval_secs // 3600}h")
-    while True:
-        time.sleep(interval_secs)
-        if not _op_lock.acquire(blocking=False):
-            _log("[schedule] Skipping scheduled export — operation already in progress")
-            continue
-        global _op_running
-        _op_running = True
-        try:
-            export_all(load_options())
-        except TwoFactorRequired:
-            _log("[schedule] Export failed: 2FA is required — set npm_token in config for scheduled use")
-        except Exception as exc:
-            _log(f"[schedule] Export failed: {exc}")
-        finally:
-            _op_running = False
-            _op_lock.release()
-
-
 # ---------------------------------------------------------------------------
 # Flask web app
 # ---------------------------------------------------------------------------
@@ -546,24 +513,6 @@ _HTML = r"""<!DOCTYPE html>
            font-size: 0.77rem; line-height: 1.5; padding: 0.75rem;
            border-radius: 5px; height: 220px; overflow-y: auto;
            white-space: pre-wrap; word-break: break-all; }
-    /* OTP modal */
-    #otp-overlay { display: none; position: fixed; inset: 0;
-                   background: var(--overlay-bg); z-index: 100;
-                   align-items: center; justify-content: center; }
-    #otp-overlay.active { display: flex; }
-    #otp-modal { background: var(--surface); border-radius: 10px; padding: 1.75rem;
-                 width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,0.25); }
-    #otp-modal h2 { font-size: 1rem; margin-bottom: 0.5rem; }
-    #otp-modal p  { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem; }
-    #otp-input { width: 100%; padding: 0.6rem 0.75rem; font-size: 1.4rem;
-                 letter-spacing: 0.25rem; text-align: center;
-                 border: 1px solid var(--input-border); border-radius: 5px;
-                 margin-bottom: 0.75rem; font-family: monospace;
-                 background: var(--input-bg); color: var(--input-color); }
-    #otp-input:focus { outline: none; border-color: #03a9f4; }
-    #otp-error { font-size: 0.8rem; color: #e53935; min-height: 1.2em;
-                 margin-bottom: 0.5rem; }
-    #otp-modal .actions { display: flex; justify-content: flex-end; }
     /* Tabs */
     .tabs { display: flex; gap: 0.25rem; margin-bottom: 1.25rem; }
     .tab  { background: var(--tab-bg); color: var(--tab-fg); border-radius: 6px 6px 0 0;
@@ -634,41 +583,10 @@ _HTML = r"""<!DOCTYPE html>
         <input type="email" id="cfg-npm-username">
         <label>Password</label>
         <input type="password" id="cfg-npm-password" placeholder="leave blank to keep current">
-        <label>Pre-generated Token (optional — for 2FA / scheduled use)</label>
-        <input type="password" id="cfg-npm-token" placeholder="leave blank to keep current">
       </div>
-    </div>
-    <div class="card">
-      <h2>Scheduled Export</h2>
-      <div class="field-group">
-        <label class="checkbox-label">
-          <input type="checkbox" id="cfg-schedule-enabled">
-          Enable automatic scheduled exports
-        </label>
-        <label>Interval (hours)</label>
-        <input type="number" id="cfg-schedule-hours" min="1" max="168">
-      </div>
-      <p class="meta" style="margin-top:0.75rem">
-        &#9888;&#65039; Schedule changes take effect after restarting the add-on.
-      </p>
     </div>
     <button class="btn-primary" id="btn-save" onclick="saveConfig()">Save</button>
     <span id="save-status"></span>
-  </div>
-
-  <!-- 2FA modal -->
-  <div id="otp-overlay">
-    <div id="otp-modal">
-      <h2>Two-factor authentication</h2>
-      <p>Enter the 6-digit code from your authenticator app.</p>
-      <input id="otp-input" type="text" inputmode="numeric" maxlength="8"
-             placeholder="000000" autocomplete="one-time-code"
-             onkeydown="if(event.key==='Enter') submitOtp()">
-      <div id="otp-error"></div>
-      <div class="actions">
-        <button class="btn-primary" onclick="submitOtp()">Verify</button>
-      </div>
-    </div>
   </div>
 
   <script>
@@ -691,8 +609,6 @@ _HTML = r"""<!DOCTYPE html>
     // HA ingress strips the prefix before forwarding to Flask,
     // but the browser URL still contains it — use it as the fetch base.
     const base = window.location.pathname.replace(/\/+$/, '');
-    let _pendingOp = null;
-    let _challengeToken = null;
     let _selectedFile = null;
     let _importArmed = false;
     let _importArmTimer = null;
@@ -715,28 +631,19 @@ _HTML = r"""<!DOCTYPE html>
         document.getElementById('cfg-npm-url').value      = d.npm_url;
         document.getElementById('cfg-npm-username').value = d.npm_username;
         document.getElementById('cfg-npm-password').value = '';
-        document.getElementById('cfg-npm-token').value    = '';
         document.getElementById('cfg-npm-password').placeholder =
           d.npm_password ? 'leave blank to keep current' : 'not set';
-        document.getElementById('cfg-npm-token').placeholder =
-          d.npm_token ? 'leave blank to keep current' : 'not set';
-        document.getElementById('cfg-schedule-enabled').checked = d.schedule_enabled;
-        document.getElementById('cfg-schedule-hours').value     = d.schedule_interval_hours;
       } catch (_) {}
     }
 
     async function saveConfig() {
       document.getElementById('btn-save').disabled = true;
       document.getElementById('save-status').textContent = '';
-      const pwdVal   = document.getElementById('cfg-npm-password').value;
-      const tokenVal = document.getElementById('cfg-npm-token').value;
+      const pwdVal = document.getElementById('cfg-npm-password').value;
       const body = {
-        npm_url:                 document.getElementById('cfg-npm-url').value,
-        npm_username:            document.getElementById('cfg-npm-username').value,
-        npm_password:            pwdVal   || '\u2022\u2022\u2022\u2022\u2022',
-        npm_token:               tokenVal || '\u2022\u2022\u2022\u2022\u2022',
-        schedule_enabled:        document.getElementById('cfg-schedule-enabled').checked,
-        schedule_interval_hours: parseInt(document.getElementById('cfg-schedule-hours').value) || 24,
+        npm_url:      document.getElementById('cfg-npm-url').value,
+        npm_username: document.getElementById('cfg-npm-username').value,
+        npm_password: pwdVal || '\u2022\u2022\u2022\u2022\u2022',
       };
       const r = await fetch(base + '/api/config', {
         method: 'POST',
@@ -752,24 +659,12 @@ _HTML = r"""<!DOCTYPE html>
       try {
         const d = await (await fetch(base + '/api/status')).json();
         document.getElementById('npm-url').textContent = d.npm_url;
-        const busy = d.running || !!d.pending_2fa;
+        const busy = d.running;
         document.getElementById('btn-export').disabled = busy;
         document.getElementById('btn-import').disabled = busy || !_selectedFile;
         document.getElementById('btn-delete').disabled = busy || !_selectedFile;
         document.getElementById('op-status-bar').textContent =
           d.running ? '\u23f3 Operation in progress\u2026' : '';
-
-        if (d.pending_2fa && !_challengeToken) {
-          _challengeToken = d.pending_2fa;
-          document.getElementById('otp-error').textContent = '';
-          document.getElementById('otp-input').value = '';
-          document.getElementById('otp-overlay').classList.add('active');
-          document.getElementById('otp-input').focus();
-        }
-        if (!d.pending_2fa && _challengeToken) {
-          _challengeToken = null;
-          document.getElementById('otp-overlay').classList.remove('active');
-        }
       } catch (_) {}
     }
 
@@ -819,7 +714,6 @@ _HTML = r"""<!DOCTYPE html>
     }
 
     async function triggerExport() {
-      _pendingOp = { type: 'export' };
       document.getElementById('btn-export').disabled = true;
       document.getElementById('btn-import').disabled = true;
       document.getElementById('op-status-bar').textContent = '\u23f3 Starting export\u2026';
@@ -845,7 +739,6 @@ _HTML = r"""<!DOCTYPE html>
       _importArmed = false;
       btn.textContent = 'Import Selected';
       btn.style.background = '';
-      _pendingOp = { type: 'import', filename: _selectedFile };
       btn.disabled = true;
       document.getElementById('btn-export').disabled = true;
       document.getElementById('op-status-bar').textContent = '\u23f3 Starting import\u2026';
@@ -886,33 +779,6 @@ _HTML = r"""<!DOCTYPE html>
         .then(() => loadFiles());
     }
 
-    async function submitOtp() {
-      const code = document.getElementById('otp-input').value.trim();
-      if (!code) return;
-      document.getElementById('otp-error').textContent = '';
-      const r = await fetch(base + '/api/auth/verify2fa', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ challenge_token: _challengeToken, code })
-      });
-      if (!r.ok) {
-        const d = await r.json();
-        document.getElementById('otp-error').textContent = d.error || 'Verification failed';
-        document.getElementById('otp-input').select();
-        return;
-      }
-      // Auth succeeded — hide modal and auto-retry the pending operation
-      document.getElementById('otp-overlay').classList.remove('active');
-      _challengeToken = null;
-      document.getElementById('op-status-bar').textContent = '\u2713 Authenticated';
-      if (_pendingOp) {
-        const op = _pendingOp;
-        _pendingOp = null;
-        if (op.type === 'export') triggerExport();
-        else if (op.type === 'import') triggerImport(op.filename);
-      }
-    }
-
     loadStatus(); loadFiles(); loadLogs();
     setInterval(() => Promise.all([loadStatus(), loadLogs()]), 2000);
     setInterval(loadFiles, 8000);
@@ -941,7 +807,6 @@ def api_status():
     return jsonify({
         "npm_url": cfg.get("npm_url", ""),
         "running": _op_running,
-        "pending_2fa": _pending_2fa,
     })
 
 
@@ -974,30 +839,6 @@ def api_logs():
     return jsonify({"lines": list(_log_lines)})
 
 
-@app.route("/api/auth/verify2fa", methods=["POST"])
-def api_verify2fa():
-    global _pending_2fa
-    body = flask_request.get_json() or {}
-    challenge_token = body.get("challenge_token", "").strip()
-    code = body.get("code", "").strip()
-    if not challenge_token or not code:
-        return jsonify({"error": "challenge_token and code required"}), 400
-    cfg = load_options()
-    url = f"{cfg['npm_url'].rstrip('/')}/api/tokens/2fa"
-    resp = requests.post(
-        url,
-        json={"challenge_token": challenge_token, "code": code},
-        timeout=15,
-    )
-    if resp.status_code == 401:
-        return jsonify({"error": "Invalid OTP code — check your authenticator app"}), 401
-    resp.raise_for_status()
-    data = resp.json()
-    _set_session_token(data["token"], data["expires"])
-    _pending_2fa = None
-    _log("[auth] 2FA verified — session token cached")
-    return jsonify({"status": "authenticated"})
-
 
 @app.route("/api/config")
 def api_config_get():
@@ -1005,12 +846,9 @@ def api_config_get():
     def mask(val):
         return _MASKED if val else ""
     return jsonify({
-        "npm_url":                 cfg.get("npm_url", ""),
-        "npm_username":            cfg.get("npm_username", ""),
-        "npm_password":            mask(cfg.get("npm_password", "")),
-        "npm_token":               mask(cfg.get("npm_token", "")),
-        "schedule_enabled":        cfg.get("schedule_enabled", False),
-        "schedule_interval_hours": cfg.get("schedule_interval_hours", 24),
+        "npm_url":      cfg.get("npm_url", ""),
+        "npm_username": cfg.get("npm_username", ""),
+        "npm_password": mask(cfg.get("npm_password", "")),
     })
 
 
@@ -1019,33 +857,26 @@ def api_config_post():
     body = flask_request.get_json() or {}
     current = load_options()
     updates = {}
-    for key in ("npm_url", "npm_username", "schedule_enabled", "schedule_interval_hours"):
+    for key in ("npm_url", "npm_username"):
         if key in body:
             updates[key] = body[key]
-    for key in ("npm_password", "npm_token"):
-        val = body.get(key, _MASKED)
-        if val != _MASKED:
-            updates[key] = val
-        else:
-            updates[key] = current.get(key, "")
+    val = body.get("npm_password", _MASKED)
+    updates["npm_password"] = val if val != _MASKED else current.get("npm_password", "")
     save_options(updates)
     return jsonify({"status": "saved"})
 
 
 @app.route("/api/export", methods=["POST"])
 def api_export():
-    global _op_running, _pending_2fa
+    global _op_running
     if not _op_lock.acquire(blocking=False):
         return jsonify({"error": "Operation already in progress"}), 409
     _op_running = True
 
     def run():
-        global _op_running, _pending_2fa
+        global _op_running
         try:
             export_all(load_options())
-        except TwoFactorRequired as exc:
-            _pending_2fa = exc.challenge_token
-            _log("[auth] 2FA required — enter your code in the prompt")
         except Exception as exc:
             _log(f"[export] ERROR: {exc}")
         finally:
@@ -1058,7 +889,7 @@ def api_export():
 
 @app.route("/api/import", methods=["POST"])
 def api_import():
-    global _op_running, _pending_2fa
+    global _op_running
     body = flask_request.get_json() or {}
     filename = body.get("filename", "").strip()
     if not filename:
@@ -1068,12 +899,9 @@ def api_import():
     _op_running = True
 
     def run():
-        global _op_running, _pending_2fa
+        global _op_running
         try:
             import_all(load_options(), filename)
-        except TwoFactorRequired as exc:
-            _pending_2fa = exc.challenge_token
-            _log("[auth] 2FA required — enter your code in the prompt")
         except Exception as exc:
             _log(f"[import] ERROR: {exc}")
         finally:
@@ -1085,10 +913,6 @@ def api_import():
 
 
 def main():
-    cfg = load_options()
-    if cfg.get("schedule_enabled"):
-        threading.Thread(target=_schedule_loop, args=(cfg,), daemon=True).start()
-
     _log(f"[server] Starting on port {INGRESS_PORT}")
     app.run(host="0.0.0.0", port=INGRESS_PORT, threaded=True)
 

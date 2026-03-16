@@ -1,6 +1,6 @@
 {
   "name": "NPM Export Import",
-  "version": "0.1.15",
+  "version": "0.1.17",
   "slug": "npm-export-import",
   "description": "Export and import Nginx Proxy Manager configuration (proxy hosts, redirections, streams, access lists, and SSL certificates) via a web UI.",
   "url": "https://github.com/SlopSync-Labs/home-assistant-apps",
@@ -16,17 +16,11 @@
   "options": {
     "npm_url": "http://homeassistant.local:81",
     "npm_username": "admin@example.com",
-    "npm_password": "",
-    "npm_token": "",
-    "schedule_enabled": false,
-    "schedule_interval_hours": 24
+    "npm_password": ""
   },
   "schema": {
     "npm_url": "str",
     "npm_username": "str",
-    "npm_password": "password",
-    "npm_token": "password?",
-    "schedule_enabled": "bool",
-    "schedule_interval_hours": "int?"
+    "npm_password": "password"
   }
 }

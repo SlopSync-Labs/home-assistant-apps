@@ -3,6 +3,27 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.17] - 2026-03-15
+
+### Removed
+
+- `npm_token` config option and all associated 2FA infrastructure (interactive OTP
+  modal, `POST /api/auth/verify2fa` endpoint, `TwoFactorRequired` exception,
+  pending-op auto-retry logic)
+- If an NPM account has 2FA enabled the add-on now logs a clear error rather than
+  silently prompting — disable 2FA on the NPM account to use this add-on
+
+---
+
+## [0.1.16] - 2026-03-15
+
+### Removed
+
+- Scheduled auto-export feature (`schedule_enabled`, `schedule_interval_hours` config
+  options, `_schedule_loop` background thread, Settings tab schedule card)
+
+---
+
 ## [0.1.15] - 2026-03-15
 
 ### Added

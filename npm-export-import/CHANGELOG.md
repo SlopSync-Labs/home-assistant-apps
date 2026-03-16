@@ -3,6 +3,15 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.25] - 2026-03-15
+
+### Added
+
+- `panel_icon: mdi:swap-vertical` in `config.json` — sets the sidebar icon
+  instead of the default puzzle piece
+
+---
+
 ## [0.1.24] - 2026-03-15
 
 ### Fixed

@@ -3,6 +3,16 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.15] - 2026-03-15
+
+### Added
+
+- Add-on icon displayed in the page header alongside the title
+- `icon.png` copied into the Docker image and embedded as a base64 data URI
+  (no ingress path issues)
+
+---
+
 ## [0.1.14] - 2026-03-15
 
 ### Added

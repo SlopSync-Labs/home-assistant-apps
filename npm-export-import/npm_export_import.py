@@ -526,6 +526,8 @@ _HTML = r"""<!DOCTYPE html>
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     .page-header { display: flex; align-items: center; justify-content: space-between;
                    margin-bottom: 1.25rem; }
+    .page-title  { display: flex; align-items: center; gap: 0.6rem; }
+    .app-icon    { width: 36px; height: 36px; border-radius: 8px; display: block; }
     #op-status-bar { min-height: 1.6rem; display: flex; align-items: center;
                      font-size: 0.82rem; color: var(--text-muted);
                      margin-bottom: 0.5rem; padding: 0 0.1rem; }
@@ -585,7 +587,10 @@ _HTML = r"""<!DOCTYPE html>
 </head>
 <body>
   <div class="page-header">
-    <h1>NPM Export Import</h1>
+    <div class="page-title">
+      <img src="__ICON_URI__" class="app-icon" alt="">
+      <h1>NPM Export Import</h1>
+    </div>
     <button class="btn-theme" id="btn-theme" onclick="toggleTheme()" title="Toggle dark mode"></button>
   </div>
 
@@ -917,9 +922,17 @@ _HTML = r"""<!DOCTYPE html>
 """
 
 
+def _icon_data_uri():
+    try:
+        with open("/app/icon.png", "rb") as f:
+            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+    except Exception:
+        return ""
+
+
 @app.route("/")
 def index():
-    return _HTML
+    return _HTML.replace("__ICON_URI__", _icon_data_uri())
 
 
 @app.route("/api/status")

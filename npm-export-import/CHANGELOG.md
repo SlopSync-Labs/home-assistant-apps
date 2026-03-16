@@ -2,6 +2,21 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.6] - 2026-03-15
+
+### Fixed
+
+- Access list export now fetches `?expand=items,clients` so auth entries and IP
+  rules are included in the backup (previously only the top-level metadata was exported)
+- Access list import skips creation if an entry with the same name already exists
+  on the target, reusing the existing ID for proxy host remapping instead of
+  creating a duplicate
+- Stream import payload reduced to the 5 fields the POST endpoint actually accepts
+  (`incoming_port`, `forwarding_host`, `forwarding_port`, `tcp_forwarding`,
+  `udp_forwarding`) — `enabled` and other fields cause a 400 on this endpoint
+
+---
+
 ## [0.1.5] - 2026-03-15
 
 ### Fixed

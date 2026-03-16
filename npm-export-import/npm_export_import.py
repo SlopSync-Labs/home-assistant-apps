@@ -335,6 +335,8 @@ def import_all(cfg, import_file):
             "forwarding_port": st.get("forwarding_port"),
             "tcp_forwarding":  st.get("tcp_forwarding", True),
             "udp_forwarding":  st.get("udp_forwarding", False),
+            "certificate_id":  st.get("certificate_id", 0),
+            "meta":            st.get("meta", {}),
         }
         resp = requests.post(
             f"{base}/api/nginx/streams",

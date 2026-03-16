@@ -470,7 +470,8 @@ _HTML = r"""<!DOCTYPE html>
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     #op-status-bar { min-height: 1.6rem; display: flex; align-items: center;
                      font-size: 0.82rem; color: #888; margin-bottom: 0.5rem; padding: 0 0.1rem; }
-    .file-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .file-list { display: flex; flex-direction: column; gap: 0.5rem;
+                 max-height: 248px; overflow-y: auto; }
     .file-row  { display: flex; align-items: center; gap: 0.75rem;
                  padding: 0.5rem 0.6rem; background: #fafafa;
                  border-radius: 5px; border: 1px solid #eee; cursor: pointer; }
@@ -539,11 +540,11 @@ _HTML = r"""<!DOCTYPE html>
 
     <div class="card">
       <h2>Import</h2>
-      <p class="meta">Select a backup file to restore into NPM.</p>
-      <div class="file-list" id="file-list"><span class="empty">Loading…</span></div>
       <div class="import-actions">
-        <button class="btn-secondary" id="btn-import" onclick="triggerImport()" disabled>Import Selected</button>
+        <button class="btn-primary" id="btn-import" onclick="triggerImport()" disabled>Import Selected</button>
       </div>
+      <p class="meta" style="margin-top:0.75rem">Select a backup file to restore into NPM.</p>
+      <div class="file-list" id="file-list"><span class="empty">Loading…</span></div>
     </div>
 
     <div class="card">

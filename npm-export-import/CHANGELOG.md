@@ -3,6 +3,15 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.12] - 2026-03-15
+
+### Changed
+
+- Import button moved above the file list and now matches the Export button color
+- File list is now scrollable with a maximum of 5 visible entries
+
+---
+
 ## [0.1.11] - 2026-03-15
 
 ### Changed

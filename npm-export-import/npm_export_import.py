@@ -2,6 +2,7 @@ import base64
 import collections
 import json
 import os
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -190,7 +191,8 @@ def export_all(cfg):
     _log("[export] Fetching configuration...")
     data = fetch_all(cfg["npm_url"], headers)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    filename = os.path.join(EXPORT_DIR, f"npm-export-{timestamp}.json")
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", cfg.get("name", "npm")).strip("_") or "npm"
+    filename = os.path.join(EXPORT_DIR, f"{safe_name}-export-{timestamp}.json")
     with open(filename, "w") as f:
         json.dump({"exported_at": timestamp, "data": data}, f, indent=2)
     _log(f"[export] Done — wrote {os.path.basename(filename)}")

@@ -3,6 +3,16 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.23] - 2026-03-15
+
+### Changed
+
+- Export filenames now include the server name as a prefix —
+  e.g. `MyNPM-export-20260316T120000Z.json` instead of `npm-export-…json`;
+  non-alphanumeric characters in the server name are replaced with underscores
+
+---
+
 ## [0.1.22] - 2026-03-15
 
 ### Fixed

@@ -3,11 +3,34 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
-## [0.1.26] - 2026-03-15
+## [0.2.0] - 2026-03-15
+
+### Added
+
+- Full web UI via Home Assistant ingress — export and import triggered from the
+  add-on panel with live operation status and a scrollable log
+- **Multi-server support** — configure any number of NPM instances in the
+  Configuration tab; each has a name, URL, username, and password; separate
+  Source and Target dropdowns on the Operations tab enable direct
+  instance-to-instance migration
+- **Interactive 2FA** — when NPM requires a one-time code a modal appears;
+  after verification the pending export or import auto-retries automatically
+- Dark mode defaulting to system preference, with a toggle saved to
+  `localStorage`
+- Add-on icon displayed in the page header; `mdi:swap-vertical-bold` sidebar
+  icon replaces the default puzzle piece
 
 ### Changed
 
-- Renamed "Settings" tab to "Configuration"; updated all internal references to match
+- Export filenames are prefixed with the source server name
+  (e.g. `MyNPM-export-20260316T120000Z.json`)
+- Import is idempotent — proxy hosts and access lists are updated (PUT) if they
+  already exist on the target; streams skip on port conflict rather than
+  duplicating
+- SSL certificates are exported with their cert and private key and restored as
+  custom certificates on the target instance
+- All NPM connection settings managed in-UI via the Configuration tab; no
+  add-on restart required when changing servers
 
 ---
 

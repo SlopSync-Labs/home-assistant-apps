@@ -3,6 +3,17 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.9] - 2026-03-15
+
+### Fixed
+
+- Access list import logs client rule count from the NPM response so silent
+  drops are detectable (`(N client rules)` in the log after each create/update)
+- Stream import now checks for existing streams by `incoming_port` before
+  creating — skips with a warning instead of duplicating
+
+---
+
 ## [0.1.8] - 2026-03-15
 
 ### Fixed

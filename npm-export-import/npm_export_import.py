@@ -259,7 +259,9 @@ def _import_access_lists(base, headers, access_lists):
             if not _check(resp, f"access_list {old_id} ({name}) update"):
                 continue
             al_id_map[old_id] = new_id
-            _log(f"[import] access_list {old_id} -> {new_id} ({name}) — updated existing")
+            result = resp.json()
+            client_count = len(result.get("clients", []))
+            _log(f"[import] access_list {old_id} -> {new_id} ({name}) — updated ({client_count} client rules)")
         else:
             resp = requests.post(
                 f"{base}/api/nginx/access-lists",
@@ -269,9 +271,11 @@ def _import_access_lists(base, headers, access_lists):
             )
             if not _check(resp, f"access_list {old_id} ({name})"):
                 continue
-            new_id = resp.json()["id"]
+            result = resp.json()
+            new_id = result["id"]
             al_id_map[old_id] = new_id
-            _log(f"[import] access_list {old_id} -> {new_id} ({name})")
+            client_count = len(result.get("clients", []))
+            _log(f"[import] access_list {old_id} -> {new_id} ({name}) ({client_count} client rules)")
     return al_id_map
 
 
@@ -355,9 +359,20 @@ def import_all(cfg, import_file):
         if _check(resp, f"redirection_host {rh['id']} {rh.get('domain_names')}"):
             _log(f"[import] redirection_host {rh['id']} -> {resp.json()['id']}")
 
+    existing_streams_resp = requests.get(f"{base}/api/nginx/streams", headers=json_headers, timeout=15)
+    existing_ports = set()
+    if existing_streams_resp.ok:
+        existing_ports = {s.get("incoming_port") for s in existing_streams_resp.json()}
+    else:
+        _log(f"[import] WARNING: could not fetch existing streams ({existing_streams_resp.status_code}) — duplicate check skipped")
+
     for st in data.get("streams", []):
+        port = st.get("incoming_port")
+        if port in existing_ports:
+            _log(f"[import] SKIP stream {st['id']} (port {port}) — already exists on target")
+            continue
         payload = {
-            "incoming_port":   st.get("incoming_port"),
+            "incoming_port":   port,
             "forwarding_host": st.get("forwarding_host", ""),
             "forwarding_port": st.get("forwarding_port"),
             "tcp_forwarding":  st.get("tcp_forwarding", True),
@@ -369,8 +384,8 @@ def import_all(cfg, import_file):
             json=payload,
             timeout=15,
         )
-        if _check(resp, f"stream {st['id']} payload={payload}"):
-            _log(f"[import] stream {st['id']} -> {resp.json()['id']}")
+        if _check(resp, f"stream {st['id']} port {port}"):
+            _log(f"[import] stream {st['id']} -> {resp.json()['id']} (port {port})")
 
     _log("[import] Done.")
 

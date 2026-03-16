@@ -128,11 +128,17 @@ def _read_cert_files(cert_id):
     return {"fullchain_pem": fc_b64, "privkey_pem": pk_b64}
 
 
+ENTITY_EXPAND = {
+    "access_lists": "items,clients",
+}
+
+
 def fetch_all(base_url, headers):
     base = base_url.rstrip("/")
     data = {}
     for key, path in ENTITY_ENDPOINTS.items():
-        resp = requests.get(f"{base}{path}", headers=headers, timeout=15)
+        params = {"expand": ENTITY_EXPAND[key]} if key in ENTITY_EXPAND else {}
+        resp = requests.get(f"{base}{path}", headers=headers, params=params, timeout=15)
         resp.raise_for_status()
         data[key] = resp.json()
 
@@ -214,17 +220,26 @@ def _import_certificates(base, headers, certs):
 
 def _import_access_lists(base, headers, access_lists):
     """Create access lists. Returns old->new ID map."""
+    # Build a name->id map of access lists that already exist on the target
+    existing_resp = requests.get(f"{base}/api/nginx/access-lists", headers=headers, timeout=15)
+    existing_resp.raise_for_status()
+    existing_by_name = {al["name"]: al["id"] for al in existing_resp.json()}
+
     al_id_map = {}
     for al in access_lists:
         old_id = al["id"]
+        name = al.get("name", "")
+
+        if name in existing_by_name:
+            new_id = existing_by_name[name]
+            al_id_map[old_id] = new_id
+            _log(f"[import] access_list {old_id} -> {new_id} ({name}) — already exists, skipped")
+            continue
+
         # Only send the fields NPM's create endpoint accepts — GET returns extra
         # relation fields like proxy_hosts that cause a 400 if echoed back.
-        # Note: htpasswd passwords are exported as bcrypt hashes; NPM will store
-        # them as-is so auth still works, but they will be double-hashed on the
-        # target if NPM re-hashes on write. Passwords are included on a best-effort
-        # basis; users may need to reset credentials after migration.
         payload = {
-            "name": al.get("name", ""),
+            "name": name,
             "satisfy_any": al.get("satisfy_any", False),
             "pass_auth": al.get("pass_auth", False),
             "items": [
@@ -245,7 +260,7 @@ def _import_access_lists(base, headers, access_lists):
         resp.raise_for_status()
         new_id = resp.json()["id"]
         al_id_map[old_id] = new_id
-        _log(f"[import] access_list {old_id} -> {new_id} ({al.get('name', '')})")
+        _log(f"[import] access_list {old_id} -> {new_id} ({name})")
     return al_id_map
 
 

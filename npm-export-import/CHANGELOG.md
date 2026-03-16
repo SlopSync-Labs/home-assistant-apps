@@ -3,6 +3,22 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.11] - 2026-03-15
+
+### Changed
+
+- Operations tab redesigned for consistency: file list rows are now selectable
+  (click to highlight) with a single **Import Selected** button mirroring the
+  **Export Now** button — no more per-row import buttons
+- Operation status moved to a fixed-height bar above the cards so the page
+  layout never shifts when status text appears or disappears
+- Removed "Run against a fresh or cleared instance to avoid duplicates" note
+  since duplicate handling is now automatic
+- Import confirmation uses the single Import Selected button (turn red →
+  Confirm? on first click, fires on second click within 3 s)
+
+---
+
 ## [0.1.10] - 2026-03-15
 
 ### Fixed

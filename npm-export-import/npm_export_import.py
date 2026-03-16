@@ -468,13 +468,17 @@ _HTML = r"""<!DOCTYPE html>
     .btn-secondary { background: #e8f5e9; color: #2e7d32; }
     .btn-secondary:hover:not(:disabled) { background: #c8e6c9; }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
-    #op-status { font-size: 0.82rem; color: #888; margin-left: 0.6rem; }
+    #op-status-bar { min-height: 1.6rem; display: flex; align-items: center;
+                     font-size: 0.82rem; color: #888; margin-bottom: 0.5rem; padding: 0 0.1rem; }
     .file-list { display: flex; flex-direction: column; gap: 0.5rem; }
     .file-row  { display: flex; align-items: center; gap: 0.75rem;
                  padding: 0.5rem 0.6rem; background: #fafafa;
-                 border-radius: 5px; border: 1px solid #eee; }
+                 border-radius: 5px; border: 1px solid #eee; cursor: pointer; }
+    .file-row:hover   { background: #f0f7ff; border-color: #b3d9f7; }
+    .file-row.selected { background: #e3f2fd; border-color: #03a9f4; }
     .file-name { font-family: monospace; font-size: 0.8rem; flex: 1; }
     .file-size { font-size: 0.75rem; color: #aaa; white-space: nowrap; }
+    .import-actions { margin-top: 0.75rem; }
     .empty     { font-size: 0.85rem; color: #aaa; font-style: italic; }
     #log { background: #1e1e1e; color: #ccc; font-family: monospace;
            font-size: 0.77rem; line-height: 1.5; padding: 0.75rem;
@@ -525,18 +529,21 @@ _HTML = r"""<!DOCTYPE html>
   </div>
 
   <div id="tab-operations">
+    <div id="op-status-bar"></div>
+
     <div class="card">
       <div class="meta">Connected to: <code id="npm-url">…</code></div>
       <h2>Export</h2>
       <button class="btn-primary" id="btn-export" onclick="triggerExport()">Export Now</button>
-      <span id="op-status"></span>
     </div>
 
     <div class="card">
       <h2>Import</h2>
-      <p class="meta">Select a backup file to restore into NPM.
-         Run against a fresh or cleared instance to avoid duplicates.</p>
+      <p class="meta">Select a backup file to restore into NPM.</p>
       <div class="file-list" id="file-list"><span class="empty">Loading…</span></div>
+      <div class="import-actions">
+        <button class="btn-secondary" id="btn-import" onclick="triggerImport()" disabled>Import Selected</button>
+      </div>
     </div>
 
     <div class="card">
@@ -596,8 +603,11 @@ _HTML = r"""<!DOCTYPE html>
     // HA ingress strips the prefix before forwarding to Flask,
     // but the browser URL still contains it — use it as the fetch base.
     const base = window.location.pathname.replace(/\/+$/, '');
-    let _pendingOp = null;       // {type:'export'} or {type:'import', filename:'...'}
+    let _pendingOp = null;
     let _challengeToken = null;
+    let _selectedFile = null;
+    let _importArmed = false;
+    let _importArmTimer = null;
 
     function showTab(name, btn) {
       document.getElementById('tab-operations').style.display =
@@ -654,8 +664,8 @@ _HTML = r"""<!DOCTYPE html>
         document.getElementById('npm-url').textContent = d.npm_url;
         const busy = d.running || !!d.pending_2fa;
         document.getElementById('btn-export').disabled = busy;
-        document.querySelectorAll('.btn-import').forEach(b => b.disabled = busy);
-        document.getElementById('op-status').textContent =
+        document.getElementById('btn-import').disabled = busy || !_selectedFile;
+        document.getElementById('op-status-bar').textContent =
           d.running ? '\u23f3 Operation in progress\u2026' : '';
 
         if (d.pending_2fa && !_challengeToken) {
@@ -672,22 +682,33 @@ _HTML = r"""<!DOCTYPE html>
       } catch (_) {}
     }
 
+    function selectFile(filename, row) {
+      _selectedFile = filename;
+      document.querySelectorAll('.file-row').forEach(r => r.classList.remove('selected'));
+      row.classList.add('selected');
+      const busy = document.getElementById('btn-export').disabled;
+      if (!busy) document.getElementById('btn-import').disabled = false;
+    }
+
     async function loadFiles() {
       try {
         const files = await (await fetch(base + '/api/files')).json();
         const el = document.getElementById('file-list');
         if (!files.length) {
           el.innerHTML = '<span class="empty">No export files found.</span>';
+          _selectedFile = null;
+          document.getElementById('btn-import').disabled = true;
           return;
         }
         el.innerHTML = files.map(f =>
-          `<div class="file-row">
+          `<div class="file-row${f.name === _selectedFile ? ' selected' : ''}"
+                onclick="selectFile('${f.name}', this)">
             <span class="file-name">${f.name}</span>
             <span class="file-size">${f.size_kb} KB</span>
-            <button class="btn-secondary btn-import"
-                    onclick="triggerImport('${f.name}')">Import</button>
           </div>`
         ).join('');
+        const busy = document.getElementById('btn-export').disabled;
+        document.getElementById('btn-import').disabled = busy || !_selectedFile;
       } catch (_) {}
     }
 
@@ -704,39 +725,38 @@ _HTML = r"""<!DOCTYPE html>
     async function triggerExport() {
       _pendingOp = { type: 'export' };
       document.getElementById('btn-export').disabled = true;
-      document.getElementById('op-status').textContent = '\u23f3 Starting\u2026';
+      document.getElementById('btn-import').disabled = true;
+      document.getElementById('op-status-bar').textContent = '\u23f3 Starting export\u2026';
       await fetch(base + '/api/export', { method: 'POST' });
     }
 
-    let _importArmed = null;   // filename armed for confirm, or null
-    let _importArmTimer = null;
-
-    function triggerImport(filename) {
-      if (_importArmed !== filename) {
-        // First click — arm the button
-        _importArmed = filename;
-        const btn = event.target.closest('button');
-        const original = btn.textContent;
+    function triggerImport() {
+      if (!_selectedFile) return;
+      const btn = document.getElementById('btn-import');
+      if (!_importArmed) {
+        _importArmed = true;
         btn.textContent = 'Confirm?';
         btn.style.background = '#e53935';
         clearTimeout(_importArmTimer);
         _importArmTimer = setTimeout(() => {
-          _importArmed = null;
-          btn.textContent = original;
+          _importArmed = false;
+          btn.textContent = 'Import Selected';
           btn.style.background = '';
         }, 3000);
         return;
       }
-      // Second click — fire
       clearTimeout(_importArmTimer);
-      _importArmed = null;
-      _pendingOp = { type: 'import', filename };
-      document.querySelectorAll('.btn-import').forEach(b => { b.disabled = true; b.style.background = ''; b.textContent = 'Import'; });
-      document.getElementById('op-status').textContent = '\u23f3 Starting\u2026';
+      _importArmed = false;
+      btn.textContent = 'Import Selected';
+      btn.style.background = '';
+      _pendingOp = { type: 'import', filename: _selectedFile };
+      btn.disabled = true;
+      document.getElementById('btn-export').disabled = true;
+      document.getElementById('op-status-bar').textContent = '\u23f3 Starting import\u2026';
       fetch(base + '/api/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename })
+        body: JSON.stringify({ filename: _selectedFile })
       });
     }
 
@@ -758,7 +778,7 @@ _HTML = r"""<!DOCTYPE html>
       // Auth succeeded — hide modal and auto-retry the pending operation
       document.getElementById('otp-overlay').classList.remove('active');
       _challengeToken = null;
-      document.getElementById('op-status').textContent = '\u2713 Authenticated';
+      document.getElementById('op-status-bar').textContent = '\u2713 Authenticated';
       if (_pendingOp) {
         const op = _pendingOp;
         _pendingOp = null;

@@ -3,6 +3,17 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.8] - 2026-03-15
+
+### Fixed
+
+- Access list import now PUTs (updates) existing entries instead of skipping
+  them — ensures clients and items are always synced even when the access list
+  was previously imported without the full data
+- Access list import: removed debug payload logging now that 500 errors are resolved
+
+---
+
 ## [0.1.7] - 2026-03-15
 
 ### Fixed

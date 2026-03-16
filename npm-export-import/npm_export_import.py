@@ -263,6 +263,7 @@ def _check(resp, context=""):
                 msg = detail["error"].get("message", "")
             _log(f"[import] SKIP {context} — already exists on target ({msg or detail})")
             return False
+        # Include the sent payload in the log so field-level schema errors are diagnosable
         _log(f"[import] ERROR {resp.status_code} {context}: {detail}")
         resp.raise_for_status()
     return True
@@ -335,8 +336,6 @@ def import_all(cfg, import_file):
             "forwarding_port": st.get("forwarding_port"),
             "tcp_forwarding":  st.get("tcp_forwarding", True),
             "udp_forwarding":  st.get("udp_forwarding", False),
-            "certificate_id":  st.get("certificate_id", 0),
-            "meta":            st.get("meta", {}),
         }
         resp = requests.post(
             f"{base}/api/nginx/streams",
@@ -344,7 +343,7 @@ def import_all(cfg, import_file):
             json=payload,
             timeout=15,
         )
-        if _check(resp, f"stream {st['id']}"):
+        if _check(resp, f"stream {st['id']} payload={payload}"):
             _log(f"[import] stream {st['id']} -> {resp.json()['id']}")
 
     _log("[import] Done.")

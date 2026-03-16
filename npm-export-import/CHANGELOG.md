@@ -3,6 +3,22 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.1.21] - 2026-03-15
+
+### Fixed
+
+- 2FA Verify button did nothing after a page refresh — `_pendingOp` was null
+  (client-side state lost on refresh) causing early bail-out in `submitOtp`
+- 2FA modal reappeared on every page refresh because `_pending_2fa` was never
+  cleared server-side on cancel; added `POST /api/auth/dismiss2fa` endpoint
+- Added Cancel button to the 2FA modal
+- `_pending_2fa` now stored as `{challenge_token, server_id}` so the server
+  resolves which server to verify against without relying on client state;
+  auto-retry still works if `_pendingOp` is available, otherwise shows
+  "Authenticated — retry your operation"
+
+---
+
 ## [0.1.20] - 2026-03-15
 
 ### Added

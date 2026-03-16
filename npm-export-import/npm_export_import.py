@@ -684,7 +684,8 @@ _HTML = r"""<!DOCTYPE html>
              placeholder="000000" autocomplete="one-time-code"
              onkeydown="if(event.key==='Enter') submitOtp()">
       <div id="otp-error"></div>
-      <div class="actions">
+      <div class="actions" style="gap:0.5rem">
+        <button class="btn-secondary" onclick="dismissOtp()">Cancel</button>
         <button class="btn-primary" onclick="submitOtp()">Verify</button>
       </div>
     </div>
@@ -863,7 +864,7 @@ _HTML = r"""<!DOCTYPE html>
           d.running ? '\u23f3 Operation in progress\u2026' : '';
 
         if (d.pending_2fa && !_challengeToken) {
-          _challengeToken = d.pending_2fa;
+          _challengeToken = d.pending_2fa.challenge_token;
           document.getElementById('otp-error').textContent = '';
           document.getElementById('otp-input').value = '';
           document.getElementById('otp-overlay').classList.add('active');
@@ -999,13 +1000,12 @@ _HTML = r"""<!DOCTYPE html>
 
     async function submitOtp() {
       const code = document.getElementById('otp-input').value.trim();
-      if (!code) return;
+      if (!code || !_challengeToken) return;
       document.getElementById('otp-error').textContent = '';
-      if (!_pendingOp) return;
       const r = await fetch(base + '/api/auth/verify2fa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ challenge_token: _challengeToken, code, server_id: _pendingOp.serverId })
+        body: JSON.stringify({ code })
       });
       if (!r.ok) {
         const d = await r.json();
@@ -1013,19 +1013,18 @@ _HTML = r"""<!DOCTYPE html>
         document.getElementById('otp-input').select();
         return;
       }
-      document.getElementById('otp-overlay').classList.remove('active');
       _challengeToken = null;
-      document.getElementById('op-status-bar').textContent = '\u2713 Authenticated';
+      document.getElementById('otp-overlay').classList.remove('active');
       const op = _pendingOp;
       _pendingOp = null;
-      if (op.type === 'export') {
+      if (op && op.type === 'export') {
         document.getElementById('btn-export').disabled = true;
         document.getElementById('op-status-bar').textContent = '\u23f3 Starting export\u2026';
         fetch(base + '/api/export', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ server_id: op.serverId })
         });
-      } else if (op.type === 'import') {
+      } else if (op && op.type === 'import') {
         document.getElementById('btn-export').disabled = true;
         document.getElementById('btn-import').disabled = true;
         document.getElementById('op-status-bar').textContent = '\u23f3 Starting import\u2026';
@@ -1033,7 +1032,16 @@ _HTML = r"""<!DOCTYPE html>
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ server_id: op.serverId, filename: op.filename })
         });
+      } else {
+        document.getElementById('op-status-bar').textContent = '\u2713 Authenticated \u2014 retry your operation';
       }
+    }
+
+    async function dismissOtp() {
+      await fetch(base + '/api/auth/dismiss2fa', { method: 'POST' });
+      _challengeToken = null;
+      _pendingOp = null;
+      document.getElementById('otp-overlay').classList.remove('active');
     }
 
     loadServers(); loadStatus(); loadFiles(); loadLogs();
@@ -1153,14 +1161,14 @@ def api_logs():
 @app.route("/api/auth/verify2fa", methods=["POST"])
 def api_verify2fa():
     global _pending_2fa
+    if not _pending_2fa:
+        return jsonify({"error": "no pending 2FA challenge"}), 400
     body = flask_request.get_json() or {}
-    challenge_token = body.get("challenge_token", "").strip()
     code = body.get("code", "").strip()
-    if not challenge_token or not code:
-        return jsonify({"error": "challenge_token and code required"}), 400
-    # Find the server whose session we need — look up by pending challenge
-    # We verify against whichever server triggered the 2FA prompt
-    server_id = body.get("server_id", "").strip()
+    if not code:
+        return jsonify({"error": "code required"}), 400
+    server_id = _pending_2fa["server_id"]
+    challenge_token = _pending_2fa["challenge_token"]
     server = _get_server(server_id)
     if not server:
         return jsonify({"error": "server not found"}), 404
@@ -1177,7 +1185,14 @@ def api_verify2fa():
     _set_session_token(server_id, data["token"], data["expires"])
     _pending_2fa = None
     _log("[auth] 2FA verified — session token cached")
-    return jsonify({"status": "authenticated"})
+    return jsonify({"status": "authenticated", "server_id": server_id})
+
+
+@app.route("/api/auth/dismiss2fa", methods=["POST"])
+def api_dismiss2fa():
+    global _pending_2fa
+    _pending_2fa = None
+    return jsonify({"status": "dismissed"})
 
 
 @app.route("/api/export", methods=["POST"])
@@ -1197,7 +1212,7 @@ def api_export():
         try:
             export_all(server)
         except TwoFactorRequired as exc:
-            _pending_2fa = exc.challenge_token
+            _pending_2fa = {"challenge_token": exc.challenge_token, "server_id": server["id"]}
             _log("[auth] 2FA required — enter your code in the prompt")
         except Exception as exc:
             _log(f"[export] ERROR: {exc}")
@@ -1229,7 +1244,7 @@ def api_import():
         try:
             import_all(server, filename)
         except TwoFactorRequired as exc:
-            _pending_2fa = exc.challenge_token
+            _pending_2fa = {"challenge_token": exc.challenge_token, "server_id": server["id"]}
             _log("[auth] 2FA required — enter your code in the prompt")
         except Exception as exc:
             _log(f"[import] ERROR: {exc}")

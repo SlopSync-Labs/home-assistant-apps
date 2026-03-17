@@ -340,14 +340,15 @@ def import_all(cfg, import_file, request_ssl=False):
     cert_id_map = _import_certificates(base, headers, data.get("certificates", []))
     al_id_map = _import_access_lists(base, json_headers, data.get("access_lists", []))
 
-    # Build domain -> id map of proxy hosts already on the target so we can
-    # PUT (update) rather than POST (duplicate) when a host already exists.
+    # Build domain -> (id, cert_id) map of proxy hosts already on the target so we can
+    # PUT (update) rather than POST (duplicate) when a host already exists,
+    # and so we can preserve an existing cert rather than requesting a duplicate.
     existing_ph_resp = requests.get(f"{base}/api/nginx/proxy-hosts", headers=json_headers, timeout=15)
     existing_ph_by_domain = {}
     if existing_ph_resp.ok:
         for existing in existing_ph_resp.json():
             for domain in existing.get("domain_names", []):
-                existing_ph_by_domain[domain] = existing["id"]
+                existing_ph_by_domain[domain] = (existing["id"], existing.get("certificate_id", 0))
     else:
         _log(f"[import] WARNING: could not fetch existing proxy hosts ({existing_ph_resp.status_code}) — duplicate check skipped")
 
@@ -361,21 +362,36 @@ def import_all(cfg, import_file, request_ssl=False):
             payload["access_list_id"] = al_id_map.get(old_al_id, 0)
         old_cert_id = payload.get("certificate_id", 0)
         needs_ssl_request = False
+        mapped_cert_id = cert_id_map.get(old_cert_id, 0) if old_cert_id else 0
+
+        domains = ph.get("domain_names", [])
+        existing_entry = next(
+            (existing_ph_by_domain[d] for d in domains if d in existing_ph_by_domain), None
+        )
+        existing_id = existing_entry[0] if existing_entry else None
+        target_cert_id = existing_entry[1] if existing_entry else 0
+
         if old_cert_id:
-            new_cert_id = cert_id_map.get(old_cert_id, 0)
-            payload["certificate_id"] = new_cert_id
-            if not new_cert_id:
+            if mapped_cert_id:
+                payload["certificate_id"] = mapped_cert_id
+            elif target_cert_id:
+                # Target already has a working cert — keep it, restore SSL settings from source
+                payload["certificate_id"] = target_cert_id
+                payload["ssl_forced"] = orig_payload.get("ssl_forced", False)
+                _log(
+                    f"[import] proxy_host {ph['id']} ({domains}) — keeping existing cert {target_cert_id} on target"
+                )
+            else:
+                # No cert available from export and none on target
+                payload["certificate_id"] = 0
                 payload["ssl_forced"] = False
                 if request_ssl:
                     needs_ssl_request = True
                 else:
                     _log(
-                        f"[import] WARNING: proxy_host {ph['id']} ({ph.get('domain_names')}) "
+                        f"[import] WARNING: proxy_host {ph['id']} ({domains}) "
                         f"had cert id={old_cert_id} which was not restored — SSL disabled"
                     )
-
-        domains = ph.get("domain_names", [])
-        existing_id = next((existing_ph_by_domain[d] for d in domains if d in existing_ph_by_domain), None)
 
         if existing_id:
             resp = requests.put(

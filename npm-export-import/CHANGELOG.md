@@ -3,6 +3,21 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.2.4] - 2026-03-17
+
+### Changed
+
+- **Request SSL is now overwrite-aware** — when a proxy host already exists on
+  the target and already has a certificate assigned, the existing cert is
+  preserved rather than zeroed out and replaced; a new LE cert is only requested
+  if the target host has no certificate at all
+- Existing cert on target is also used to restore `ssl_forced` and other SSL
+  settings from the source, so re-importing doesn't disturb a working SSL setup
+- `existing_ph_by_domain` now stores `(id, certificate_id)` tuples so cert
+  status is available without an extra API call
+
+---
+
 ## [0.2.3] - 2026-03-17
 
 ### Fixed

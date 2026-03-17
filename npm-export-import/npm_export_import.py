@@ -325,7 +325,7 @@ def _check(resp, context=""):
     return True
 
 
-def import_all(cfg, import_file):
+def import_all(cfg, import_file, request_ssl=False):
     path = os.path.join(EXPORT_DIR, import_file)
     _log(f"[import] Loading {import_file}...")
     with open(path) as f:
@@ -351,21 +351,28 @@ def import_all(cfg, import_file):
     else:
         _log(f"[import] WARNING: could not fetch existing proxy hosts ({existing_ph_resp.status_code}) — duplicate check skipped")
 
+    ssl_pending = []  # list of (target_host_id, orig_stripped_payload) for post-import LE cert requests
+
     for ph in data.get("proxy_hosts", []):
-        payload = _strip(ph)
+        orig_payload = _strip(ph)
+        payload = dict(orig_payload)
         old_al_id = payload.get("access_list_id", 0)
         if old_al_id:
             payload["access_list_id"] = al_id_map.get(old_al_id, 0)
         old_cert_id = payload.get("certificate_id", 0)
+        needs_ssl_request = False
         if old_cert_id:
             new_cert_id = cert_id_map.get(old_cert_id, 0)
             payload["certificate_id"] = new_cert_id
             if not new_cert_id:
                 payload["ssl_forced"] = False
-                _log(
-                    f"[import] WARNING: proxy_host {ph['id']} ({ph.get('domain_names')}) "
-                    f"had cert id={old_cert_id} which was not restored — SSL disabled"
-                )
+                if request_ssl:
+                    needs_ssl_request = True
+                else:
+                    _log(
+                        f"[import] WARNING: proxy_host {ph['id']} ({ph.get('domain_names')}) "
+                        f"had cert id={old_cert_id} which was not restored — SSL disabled"
+                    )
 
         domains = ph.get("domain_names", [])
         existing_id = next((existing_ph_by_domain[d] for d in domains if d in existing_ph_by_domain), None)
@@ -379,6 +386,8 @@ def import_all(cfg, import_file):
             )
             if _check(resp, f"proxy_host {ph['id']} {domains} update"):
                 _log(f"[import] proxy_host {ph['id']} -> {existing_id} ({domains}) — updated existing")
+                if needs_ssl_request:
+                    ssl_pending.append((existing_id, orig_payload))
         else:
             resp = requests.post(
                 f"{base}/api/nginx/proxy-hosts",
@@ -387,7 +396,49 @@ def import_all(cfg, import_file):
                 timeout=15,
             )
             if _check(resp, f"proxy_host {ph['id']} {domains}"):
-                _log(f"[import] proxy_host {ph['id']} -> {resp.json()['id']} ({domains})")
+                new_ph_id = resp.json()["id"]
+                _log(f"[import] proxy_host {ph['id']} -> {new_ph_id} ({domains})")
+                if needs_ssl_request:
+                    ssl_pending.append((new_ph_id, orig_payload))
+
+    if ssl_pending:
+        _log(f"[import] Requesting Let's Encrypt certificates for {len(ssl_pending)} host(s)...")
+        for target_id, orig_payload in ssl_pending:
+            domains = orig_payload.get("domain_names", [])
+            _log(f"[import] Requesting LE cert for {domains} (this may take up to 60s)...")
+            cert_resp = requests.post(
+                f"{base}/api/nginx/certificates",
+                headers=json_headers,
+                json={
+                    "provider": "letsencrypt",
+                    "domain_names": domains,
+                    "meta": {
+                        "letsencrypt_email": cfg["npm_username"],
+                        "letsencrypt_agree": True,
+                        "dns_challenge": False,
+                    },
+                },
+                timeout=120,
+            )
+            if not cert_resp.ok:
+                try:
+                    detail = cert_resp.json()
+                except Exception:
+                    detail = cert_resp.text
+                _log(f"[import] WARNING: LE cert request failed for {domains}: {detail}")
+                continue
+            new_cert_id = cert_resp.json()["id"]
+            update_payload = {**orig_payload, "certificate_id": new_cert_id}
+            update_resp = requests.put(
+                f"{base}/api/nginx/proxy-hosts/{target_id}",
+                headers=json_headers,
+                json=update_payload,
+                timeout=15,
+            )
+            if update_resp.ok:
+                _log(f"[import] LE cert {new_cert_id} applied to proxy_host {target_id} ({domains})")
+            else:
+                _log(f"[import] WARNING: cert obtained (id={new_cert_id}) but failed to update proxy_host {target_id}: {update_resp.text}")
 
     for rh in data.get("redirection_hosts", []):
         payload = _strip(rh)
@@ -545,7 +596,7 @@ _HTML = r"""<!DOCTYPE html>
     .file-row.selected { background: var(--row-sel-bg); border-color: #03a9f4; }
     .file-name { font-family: monospace; font-size: 0.8rem; flex: 1; }
     .file-size { font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; }
-    .import-actions { display: flex; gap: 0.5rem; }
+    .import-actions { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
     .empty     { font-size: 0.85rem; color: var(--text-dim); font-style: italic; }
     #log { background: #1e1e1e; color: #ccc; font-family: monospace;
            font-size: 0.77rem; line-height: 1.5; padding: 0.75rem;
@@ -635,9 +686,17 @@ _HTML = r"""<!DOCTYPE html>
       <label style="font-size:0.8rem;color:var(--text-muted);font-weight:500;display:block;margin-bottom:0.4rem">Target Server</label>
       <select id="sel-import-server" class="server-select" onchange="saveServerPref('import',this.value)"></select>
       <div class="import-actions">
-        <button class="btn-primary" id="btn-import" onclick="triggerImport()" disabled>Import Selected</button>
-        <button class="btn-secondary icon-btn" id="btn-download" onclick="triggerDownload()" disabled title="Download selected file"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/></svg></button>
-        <button class="btn-danger icon-btn" id="btn-delete" onclick="triggerDelete()" disabled title="Delete selected file"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L5 5.03a.5.5 0 0 1 .47-.53Zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 1 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg></button>
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <button class="btn-primary" id="btn-import" onclick="triggerImport()" disabled>Import Selected</button>
+          <label class="checkbox-label" id="lbl-request-ssl" style="opacity:0.45;pointer-events:none">
+            <input type="checkbox" id="chk-request-ssl" onchange="saveRequestSslPref(this.checked)">
+            Request SSL
+          </label>
+        </div>
+        <div style="display:flex;gap:0.5rem">
+          <button class="btn-secondary icon-btn" id="btn-download" onclick="triggerDownload()" disabled title="Download selected file"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/></svg></button>
+          <button class="btn-danger icon-btn" id="btn-delete" onclick="triggerDelete()" disabled title="Delete selected file"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L5 5.03a.5.5 0 0 1 .47-.53Zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 1 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg></button>
+        </div>
       </div>
       <p class="meta" style="margin-top:0.75rem">Select a backup file to restore into NPM.</p>
       <div class="file-list" id="file-list"><span class="empty">Loading…</span></div>
@@ -896,6 +955,8 @@ _HTML = r"""<!DOCTYPE html>
       if (!_op_running_client) {
         document.getElementById('btn-import').disabled = false;
         document.getElementById('btn-delete').disabled = false;
+        document.getElementById('lbl-request-ssl').style.opacity = '';
+        document.getElementById('lbl-request-ssl').style.pointerEvents = '';
       }
       document.getElementById('btn-download').disabled = false;
     }
@@ -910,6 +971,8 @@ _HTML = r"""<!DOCTYPE html>
           document.getElementById('btn-import').disabled = true;
           document.getElementById('btn-delete').disabled = true;
           document.getElementById('btn-download').disabled = true;
+          document.getElementById('lbl-request-ssl').style.opacity = '0.45';
+          document.getElementById('lbl-request-ssl').style.pointerEvents = 'none';
           return;
         }
         el.innerHTML = files.map(f =>
@@ -973,7 +1036,8 @@ _HTML = r"""<!DOCTYPE html>
       const serverId = document.getElementById('sel-import-server').value;
       if (!serverId) return;
       saveServerPref('import', serverId);
-      _pendingOp = { type: 'import', serverId, filename: _selectedFile };
+      const requestSsl = document.getElementById('chk-request-ssl').checked;
+      _pendingOp = { type: 'import', serverId, filename: _selectedFile, requestSsl };
       _currentOpType = 'import';
       btn.disabled = true;
       document.getElementById('btn-export').disabled = true;
@@ -981,7 +1045,7 @@ _HTML = r"""<!DOCTYPE html>
       fetch(base + '/api/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ server_id: serverId, filename: _selectedFile })
+        body: JSON.stringify({ server_id: serverId, filename: _selectedFile, request_ssl: requestSsl })
       });
     }
 
@@ -1072,7 +1136,7 @@ _HTML = r"""<!DOCTYPE html>
         document.getElementById('import-status').textContent = '\u23f3 Starting import\u2026';
         const ir = await fetch(base + '/api/import', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ server_id: op.serverId, filename: op.filename })
+          body: JSON.stringify({ server_id: op.serverId, filename: op.filename, request_ssl: op.requestSsl || false })
         });
         if (!ir.ok) {
           const id2 = await ir.json().catch(() => ({}));
@@ -1090,6 +1154,14 @@ _HTML = r"""<!DOCTYPE html>
       _pendingOp = null;
       document.getElementById('otp-overlay').classList.remove('active');
     }
+
+    function saveRequestSslPref(checked) {
+      localStorage.setItem('npm-ei-request-ssl', checked ? '1' : '0');
+    }
+    (function() {
+      const chk = document.getElementById('chk-request-ssl');
+      if (localStorage.getItem('npm-ei-request-ssl') === '1') chk.checked = true;
+    })();
 
     loadServers(); loadStatus(); loadFiles(); loadLogs();
     setInterval(() => Promise.all([loadStatus(), loadLogs()]), 2000);
@@ -1286,6 +1358,7 @@ def api_import():
     body = flask_request.get_json() or {}
     server_id = body.get("server_id", "").strip()
     filename = body.get("filename", "").strip()
+    request_ssl = bool(body.get("request_ssl", False))
     if not filename:
         return jsonify({"error": "filename required"}), 400
     server = _get_server(server_id)
@@ -1298,7 +1371,7 @@ def api_import():
     def run():
         global _op_running, _pending_2fa
         try:
-            import_all(server, filename)
+            import_all(server, filename, request_ssl=request_ssl)
         except TwoFactorRequired as exc:
             _pending_2fa = {"challenge_token": exc.challenge_token, "server_id": server["id"]}
             _log("[auth] 2FA required — enter your code in the prompt")

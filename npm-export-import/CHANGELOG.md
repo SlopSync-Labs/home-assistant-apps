@@ -3,6 +3,29 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.2.2] - 2026-03-17
+
+### Added
+
+- **Request SSL checkbox** — appears next to the Import button; when checked,
+  a fresh Let's Encrypt certificate is requested on the target NPM instance for
+  every proxy host that had a certificate in the export file but whose cert data
+  could not be restored directly (e.g. missing cert files)
+- After each LE cert is issued, the proxy host is updated via PUT to apply the
+  new certificate ID and restore the original SSL settings (`ssl_forced`,
+  `http2_support`, `hsts_enabled`, `hsts_subdomains`) from the export
+- The server's configured username (an email) is used as the LE registration
+  address automatically — no extra configuration required
+- `request_ssl` parameter added to `POST /api/import`; checkbox state persisted
+  in `localStorage`
+
+### Changed
+
+- Download and Delete icon buttons moved to the far right of the import actions
+  row; Import button and Request SSL checkbox remain on the left
+
+---
+
 ## [0.2.1] - 2026-03-16
 
 ### Added

@@ -428,10 +428,7 @@ def import_all(cfg, import_file, request_ssl=False):
                 json={
                     "provider": "letsencrypt",
                     "domain_names": domains,
-                    "meta": {
-                        "letsencrypt_email": cfg["npm_username"],
-                        "letsencrypt_agree": True,
-                    },
+                    "meta": {},
                 },
                 timeout=120,
             )

@@ -3,6 +3,16 @@
 
 All notable changes to the NPM Export Import add-on will be documented here.
 
+## [0.2.5] - 2026-03-17
+
+### Fixed
+
+- LE cert request now sends `meta: {}` — this NPM version rejects
+  `letsencrypt_email` and `letsencrypt_agree` as additional properties; the
+  email is taken from the NPM account settings automatically
+
+---
+
 ## [0.2.4] - 2026-03-17
 
 ### Changed
